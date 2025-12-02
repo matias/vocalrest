@@ -30,17 +30,51 @@ export function normalizeText(text: string): string {
  */
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    // Check if IndexedDB is available
+    if (typeof indexedDB === 'undefined') {
+      const error = new Error('IndexedDB is not available in this browser');
+      console.error(error);
+      reject(error);
+      return;
+    }
+
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => {
+      console.error('IndexedDB open error:', request.error);
+      reject(request.error);
+    };
+
+    request.onsuccess = () => {
+      const db = request.result;
+      // Verify the object store exists
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        console.error('Object store does not exist after open');
+        reject(new Error('Object store not found'));
+        return;
+      }
+      resolve(db);
+    };
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
+      try {
+        // Delete existing store if it exists (for clean upgrade)
+        if (db.objectStoreNames.contains(STORE_NAME)) {
+          db.deleteObjectStore(STORE_NAME);
+        }
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'normalizedText' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
+        console.log('IndexedDB upgraded, object store created');
+      } catch (error) {
+        console.error('Error creating object store:', error);
+        reject(error);
       }
+    };
+
+    request.onblocked = () => {
+      console.warn('IndexedDB upgrade blocked - please close other tabs');
+      // Don't reject, just warn - the upgrade will proceed when tabs are closed
     };
   });
 }
@@ -56,8 +90,25 @@ export async function getCachedAudio(normalizedText: string): Promise<CachedAudi
       const store = transaction.objectStore(STORE_NAME);
       const request = store.get(normalizedText);
 
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => {
+        console.error('Error getting cached audio from store:', request.error);
+        reject(request.error);
+      };
+      
+      request.onsuccess = () => {
+        const result = request.result;
+        if (result) {
+          console.log('Cache hit for:', normalizedText);
+        } else {
+          console.log('Cache miss for:', normalizedText);
+        }
+        resolve(result || null);
+      };
+
+      transaction.onerror = () => {
+        console.error('Transaction error:', transaction.error);
+        reject(transaction.error);
+      };
     });
   } catch (error) {
     console.error('Error getting cached audio:', error);
@@ -90,8 +141,20 @@ export async function cacheAudio(
 
       const request = store.put(cachedAudio);
 
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
+      request.onerror = () => {
+        console.error('Error storing cached audio:', request.error);
+        reject(request.error);
+      };
+      
+      request.onsuccess = () => {
+        console.log('Cached audio for:', normalizedText);
+        resolve();
+      };
+
+      transaction.onerror = () => {
+        console.error('Transaction error while caching:', transaction.error);
+        reject(transaction.error);
+      };
     });
   } catch (error) {
     console.error('Error caching audio:', error);

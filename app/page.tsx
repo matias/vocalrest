@@ -17,10 +17,60 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [debugLogs, setDebugLogs] = useState<Array<{ time: string; message: string; type: 'log' | 'error' | 'warn' }>>([]);
+  const debugLogRef = useRef<HTMLDivElement>(null);
 
   // Audio Context Refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+
+  // Store original console methods
+  const originalConsoleRef = useRef({
+    log: console.log,
+    error: console.error,
+    warn: console.warn,
+  });
+
+  // Debug logging function
+  const addDebugLog = useCallback((message: string, type: 'log' | 'error' | 'warn' = 'log') => {
+    const time = new Date().toLocaleTimeString();
+    setDebugLogs(prev => [...prev.slice(-49), { time, message, type }]); // Keep last 50 logs
+  }, []);
+
+  // Auto-scroll debug log to bottom
+  useEffect(() => {
+    if (debugLogRef.current) {
+      debugLogRef.current.scrollTop = debugLogRef.current.scrollHeight;
+    }
+  }, [debugLogs]);
+
+  // Intercept console messages for debug panel
+  useEffect(() => {
+    const originalLog = originalConsoleRef.current.log;
+    const originalError = originalConsoleRef.current.error;
+    const originalWarn = originalConsoleRef.current.warn;
+
+    console.log = (...args: any[]) => {
+      originalLog.apply(console, args);
+      addDebugLog(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' '), 'log');
+    };
+
+    console.error = (...args: any[]) => {
+      originalError.apply(console, args);
+      addDebugLog(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' '), 'error');
+    };
+
+    console.warn = (...args: any[]) => {
+      originalWarn.apply(console, args);
+      addDebugLog(args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' '), 'warn');
+    };
+
+    return () => {
+      console.log = originalLog;
+      console.error = originalError;
+      console.warn = originalWarn;
+    };
+  }, [addDebugLog]);
 
   // Load persistence
   useEffect(() => {
@@ -154,24 +204,37 @@ export default function Home() {
     setError(null);
     
     const normalized = normalizeText(textToSpeak);
+    addDebugLog(`Speaking text, normalized: ${normalized}`);
     
-    // Check cache first
-    const cached = await getCachedAudio(normalized);
-    
-    if (cached) {
-      // Use cached audio
-      setIsGenerating(false);
-      await playAudioFromBase64(cached.base64Audio);
-      
-      // Update cache with new timestamp and potentially new originalText
-      await cacheAudio(normalized, textToSpeak, cached.base64Audio, cached.voice);
-      
-      // Update history (move to top) - use the text that was actually typed
-      await addToHistory(textToSpeak, cached.base64Audio);
-      
-      // Clear the input text
-      setInputText('');
-      return;
+    // Check cache first (only if IndexedDB is available)
+    if (typeof indexedDB !== 'undefined') {
+      try {
+        const cached = await getCachedAudio(normalized);
+        
+        if (cached) {
+          addDebugLog('✓ Cache HIT - Using cached audio');
+          // Use cached audio
+          setIsGenerating(false);
+          await playAudioFromBase64(cached.base64Audio);
+          
+          // Update cache with new timestamp and potentially new originalText
+          await cacheAudio(normalized, textToSpeak, cached.base64Audio, cached.voice);
+          
+          // Update history (move to top) - use the text that was actually typed
+          await addToHistory(textToSpeak, cached.base64Audio);
+          
+          // Clear the input text
+          setInputText('');
+          return;
+        } else {
+          addDebugLog('✗ Cache MISS - Generating new audio');
+        }
+      } catch (error: any) {
+        addDebugLog(`Error checking cache, will generate new audio: ${error.message}`, 'error');
+        // Continue to generate new audio if cache check fails
+      }
+    } else {
+      addDebugLog('IndexedDB not available, skipping cache check', 'warn');
     }
 
     // Not in cache, generate new audio
@@ -209,8 +272,10 @@ export default function Home() {
       const data = await response.json();
       const base64Audio = data.audio;
       
+      addDebugLog('Audio generated, caching...');
       // Cache the audio
       await cacheAudio(normalized, textToSpeak, base64Audio, selectedVoice);
+      addDebugLog('Audio cached successfully');
       
       // Play the audio
       await playAudioFromBase64(base64Audio);
@@ -313,6 +378,42 @@ export default function Home() {
         {/* History */}
         <History history={history} onHistoryItemClick={speakText} onClear={handleClearHistory} />
       
+      </div>
+
+      {/* Debug Log Panel */}
+      <div className="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700 max-h-48 flex flex-col">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700">
+          <h3 className="text-sm font-semibold text-slate-300">Debug Log</h3>
+          <button
+            onClick={() => setDebugLogs([])}
+            className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1"
+          >
+            Clear
+          </button>
+        </div>
+        <div
+          ref={debugLogRef}
+          className="flex-1 overflow-y-auto px-4 py-2 text-xs font-mono space-y-1"
+        >
+          {debugLogs.length === 0 ? (
+            <div className="text-slate-500">No logs yet...</div>
+          ) : (
+            debugLogs.map((log, index) => (
+              <div
+                key={index}
+                className={`${
+                  log.type === 'error'
+                    ? 'text-red-400'
+                    : log.type === 'warn'
+                    ? 'text-yellow-400'
+                    : 'text-slate-300'
+                }`}
+              >
+                <span className="text-slate-500">[{log.time}]</span> {log.message}
+              </div>
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
