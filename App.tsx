@@ -1,0 +1,243 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { VoiceName, HistoryItem } from './types';
+import { VoiceSelector } from './components/VoiceSelector';
+import { QuickPhrases } from './components/QuickPhrases';
+import { History } from './components/History';
+import { generateSpeech } from './services/geminiService';
+import { decode, decodeAudioData } from './services/audioUtils';
+
+const App: React.FC = () => {
+  // State
+  const [inputText, setInputText] = useState('');
+  // Set default to Orus
+  const [selectedVoice, setSelectedVoice] = useState<VoiceName>(VoiceName.Orus);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  // Audio Context Refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+
+  // Load persistence
+  useEffect(() => {
+    const savedVoice = localStorage.getItem('vocalrest_voice');
+    // Ensure the saved voice is still valid in our (now strictly male) enum
+    if (savedVoice && Object.values(VoiceName).includes(savedVoice as VoiceName)) {
+      setSelectedVoice(savedVoice as VoiceName);
+    }
+    const savedHistory = localStorage.getItem('vocalrest_history');
+    if (savedHistory) {
+      try {
+        setHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error("Failed to parse history", e);
+      }
+    }
+  }, []);
+
+  // Save voice preference
+  const handleVoiceSelect = (voice: VoiceName) => {
+    setSelectedVoice(voice);
+    localStorage.setItem('vocalrest_voice', voice);
+  };
+
+  // Add to history helper
+  const addToHistory = (text: string) => {
+    setHistory(prev => {
+      // Check if an entry with the same text already exists
+      const existingIndex = prev.findIndex(item => item.text === text);
+      
+      let newHistory: HistoryItem[];
+      if (existingIndex !== -1) {
+        // Move existing entry to top
+        const existingItem = prev[existingIndex];
+        const updatedItem = {
+          ...existingItem,
+          timestamp: Date.now(), // Update timestamp
+        };
+        newHistory = [
+          updatedItem,
+          ...prev.slice(0, existingIndex),
+          ...prev.slice(existingIndex + 1)
+        ];
+      } else {
+        // Add new entry
+        const newItem: HistoryItem = {
+          id: Date.now().toString(),
+          text,
+          timestamp: Date.now(),
+        };
+        newHistory = [newItem, ...prev].slice(0, 10); // Keep last 10
+      }
+      
+      localStorage.setItem('vocalrest_history', JSON.stringify(newHistory));
+      return newHistory;
+    });
+  };
+
+  const handleClearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem('vocalrest_history');
+  };
+
+  // Stop current playback
+  const stopPlayback = useCallback(() => {
+    if (sourceNodeRef.current) {
+      try {
+        sourceNodeRef.current.stop();
+        sourceNodeRef.current.disconnect();
+      } catch (e) {
+        // Ignore errors if already stopped
+      }
+      sourceNodeRef.current = null;
+    }
+    setIsPlaying(false);
+  }, []);
+
+  // Main Speak Function
+  const speakText = async (textToSpeak: string) => {
+    if (!textToSpeak.trim()) return;
+    
+    // Stop any existing playback
+    stopPlayback();
+    setError(null);
+    setIsGenerating(true);
+
+    try {
+      // 1. Initialize AudioContext if needed (must be done on user interaction)
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+          sampleRate: 24000 // Match Gemini TTS typical sample rate
+        });
+      }
+      
+      if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
+      }
+
+      // 2. Call API
+      const base64Audio = await generateSpeech(textToSpeak, selectedVoice);
+      
+      // 3. Decode Audio
+      const audioBytes = decode(base64Audio);
+      const audioBuffer = await decodeAudioData(audioBytes, audioContextRef.current);
+
+      // 4. Play Audio
+      const source = audioContextRef.current.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContextRef.current.destination);
+      
+      source.onended = () => {
+        setIsPlaying(false);
+        sourceNodeRef.current = null;
+      };
+
+      sourceNodeRef.current = source;
+      setIsGenerating(false); // Done generating, now playing
+      setIsPlaying(true);
+      source.start();
+
+      // 5. Add to history
+      addToHistory(textToSpeak);
+      
+      // 6. Clear the input text
+      setInputText('');
+
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to generate speech. Please try again.");
+      setIsGenerating(false);
+      setIsPlaying(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    speakText(inputText);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center py-8 px-4 sm:px-6">
+      <div className="w-full max-w-2xl space-y-8">
+        
+        {/* Input Area */}
+        <div className="bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-700">
+          <form onSubmit={handleSubmit} className="relative">
+            <textarea
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="What would you like to say?"
+              className="w-full h-32 p-4 text-lg text-slate-100 placeholder:text-slate-400 bg-slate-700 border border-slate-600 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none transition-all outline-none"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  speakText(inputText);
+                }
+              }}
+            />
+            
+            {/* Action Bar */}
+            <div className="mt-4 flex items-center justify-between gap-4">
+              <button
+                type="button"
+                onClick={() => setInputText('')}
+                className="text-sm font-medium text-slate-400 hover:text-slate-200 px-2 py-1"
+                disabled={isGenerating || isPlaying}
+              >
+                Clear Text
+              </button>
+
+              <button
+                type="submit"
+                disabled={isGenerating || !inputText.trim()}
+                className={`
+                  flex items-center justify-center px-4 py-2 rounded-xl font-bold text-white transition-all transform active:scale-95
+                  ${isGenerating 
+                    ? 'bg-indigo-400 cursor-not-allowed' 
+                    : 'bg-indigo-600 hover:bg-indigo-700 hover:-translate-y-0.5'}
+                `}
+              >
+                {isGenerating ? (
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    </svg>
+                    Speak
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+
+          {error && (
+            <div className="mt-4 p-3 bg-red-900/30 text-red-300 text-sm rounded-lg border border-red-800 flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Quick Phrases */}
+        <QuickPhrases onPhraseClick={speakText} />
+
+        {/* Voice Selection */}
+        <VoiceSelector selectedVoice={selectedVoice} onSelect={handleVoiceSelect} />
+
+        {/* History */}
+        <History history={history} onHistoryItemClick={speakText} onClear={handleClearHistory} />
+      
+      </div>
+    </div>
+  );
+};
+
+export default App;
