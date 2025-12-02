@@ -5,6 +5,7 @@ import { QuickPhrases } from './components/QuickPhrases';
 import { History } from './components/History';
 import { generateSpeech } from './services/geminiService';
 import { decode, decodeAudioData } from './services/audioUtils';
+import { normalizeText, getCachedAudio, cacheAudio, getAllCachedEntries, clearCache } from './services/audioCache';
 
 const App: React.FC = () => {
   // State
@@ -27,14 +28,25 @@ const App: React.FC = () => {
     if (savedVoice && Object.values(VoiceName).includes(savedVoice as VoiceName)) {
       setSelectedVoice(savedVoice as VoiceName);
     }
-    const savedHistory = localStorage.getItem('vocalrest_history');
-    if (savedHistory) {
+    
+    // Load history from IndexedDB
+    const loadHistory = async () => {
       try {
-        setHistory(JSON.parse(savedHistory));
+        const cachedEntries = await getAllCachedEntries();
+        const historyItems: HistoryItem[] = cachedEntries
+          .slice(0, 10) // Keep last 10
+          .map(entry => ({
+            id: entry.timestamp.toString(),
+            text: entry.originalText,
+            timestamp: entry.timestamp,
+          }));
+        setHistory(historyItems);
       } catch (e) {
-        console.error("Failed to parse history", e);
+        console.error("Failed to load history from IndexedDB", e);
       }
-    }
+    };
+    
+    loadHistory();
   }, []);
 
   // Save voice preference
@@ -43,19 +55,24 @@ const App: React.FC = () => {
     localStorage.setItem('vocalrest_voice', voice);
   };
 
-  // Add to history helper
-  const addToHistory = (text: string) => {
+  // Add to history helper (history is now managed via IndexedDB)
+  const addToHistory = async (text: string, base64Audio: string) => {
+    const normalized = normalizeText(text);
+    
+    // Update history state
     setHistory(prev => {
-      // Check if an entry with the same text already exists
-      const existingIndex = prev.findIndex(item => item.text === text);
+      // Check if an entry with the same normalized text already exists
+      const existingIndex = prev.findIndex(item => normalizeText(item.text) === normalized);
       
       let newHistory: HistoryItem[];
+      const timestamp = Date.now();
+      
       if (existingIndex !== -1) {
         // Move existing entry to top
         const existingItem = prev[existingIndex];
         const updatedItem = {
           ...existingItem,
-          timestamp: Date.now(), // Update timestamp
+          timestamp, // Update timestamp
         };
         newHistory = [
           updatedItem,
@@ -65,21 +82,20 @@ const App: React.FC = () => {
       } else {
         // Add new entry
         const newItem: HistoryItem = {
-          id: Date.now().toString(),
+          id: timestamp.toString(),
           text,
-          timestamp: Date.now(),
+          timestamp,
         };
         newHistory = [newItem, ...prev].slice(0, 10); // Keep last 10
       }
       
-      localStorage.setItem('vocalrest_history', JSON.stringify(newHistory));
       return newHistory;
     });
   };
 
-  const handleClearHistory = () => {
+  const handleClearHistory = async () => {
     setHistory([]);
-    localStorage.removeItem('vocalrest_history');
+    await clearCache();
   };
 
   // Stop current playback
@@ -96,6 +112,38 @@ const App: React.FC = () => {
     setIsPlaying(false);
   }, []);
 
+  // Helper function to play audio from base64
+  const playAudioFromBase64 = useCallback(async (base64Audio: string) => {
+    // Initialize AudioContext if needed
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+        sampleRate: 24000 // Match Gemini TTS typical sample rate
+      });
+    }
+    
+    if (audioContextRef.current.state === 'suspended') {
+      await audioContextRef.current.resume();
+    }
+
+    // Decode Audio
+    const audioBytes = decode(base64Audio);
+    const audioBuffer = await decodeAudioData(audioBytes, audioContextRef.current);
+
+    // Play Audio
+    const source = audioContextRef.current.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContextRef.current.destination);
+    
+    source.onended = () => {
+      setIsPlaying(false);
+      sourceNodeRef.current = null;
+    };
+
+    sourceNodeRef.current = source;
+    setIsPlaying(true);
+    source.start();
+  }, []);
+
   // Main Speak Function
   const speakText = async (textToSpeak: string) => {
     if (!textToSpeak.trim()) return;
@@ -103,10 +151,33 @@ const App: React.FC = () => {
     // Stop any existing playback
     stopPlayback();
     setError(null);
+    
+    const normalized = normalizeText(textToSpeak);
+    
+    // Check cache first
+    const cached = await getCachedAudio(normalized);
+    
+    if (cached) {
+      // Use cached audio
+      setIsGenerating(false);
+      await playAudioFromBase64(cached.base64Audio);
+      
+      // Update cache with new timestamp and potentially new originalText
+      await cacheAudio(normalized, textToSpeak, cached.base64Audio, cached.voice);
+      
+      // Update history (move to top) - use the text that was actually typed
+      await addToHistory(textToSpeak, cached.base64Audio);
+      
+      // Clear the input text
+      setInputText('');
+      return;
+    }
+
+    // Not in cache, generate new audio
     setIsGenerating(true);
 
     try {
-      // 1. Initialize AudioContext if needed (must be done on user interaction)
+      // Initialize AudioContext if needed
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
           sampleRate: 24000 // Match Gemini TTS typical sample rate
@@ -117,32 +188,21 @@ const App: React.FC = () => {
         await audioContextRef.current.resume();
       }
 
-      // 2. Call API
+      // Call API
       const base64Audio = await generateSpeech(textToSpeak, selectedVoice);
       
-      // 3. Decode Audio
-      const audioBytes = decode(base64Audio);
-      const audioBuffer = await decodeAudioData(audioBytes, audioContextRef.current);
-
-      // 4. Play Audio
-      const source = audioContextRef.current.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContextRef.current.destination);
+      // Cache the audio
+      await cacheAudio(normalized, textToSpeak, base64Audio, selectedVoice);
       
-      source.onended = () => {
-        setIsPlaying(false);
-        sourceNodeRef.current = null;
-      };
-
-      sourceNodeRef.current = source;
-      setIsGenerating(false); // Done generating, now playing
-      setIsPlaying(true);
-      source.start();
-
-      // 5. Add to history
-      addToHistory(textToSpeak);
+      // Play the audio
+      await playAudioFromBase64(base64Audio);
       
-      // 6. Clear the input text
+      setIsGenerating(false);
+
+      // Add to history
+      await addToHistory(textToSpeak, base64Audio);
+      
+      // Clear the input text
       setInputText('');
 
     } catch (err: any) {

@@ -49,7 +49,8 @@ export const QUICK_PHRASES = [
   "Thank you.",
   "Yes, please.",
   "No, thanks.",
-  "I have laryngitis and shouldn't really talk.",
+  "Hi! I have laryngitis and shouldn't really talk.",
   "Could you repeat that?",
   "Just a sec.",
+  "I made this app to talk for me :)",
 ];
