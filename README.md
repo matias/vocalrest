@@ -34,6 +34,8 @@ npm run build
 npm start
 ```
 
+This will build the app and run it in production mode on [http://localhost:3000](http://localhost:3000). Use this to test the production build locally before deploying.
+
 ## Features
 
 - Text-to-speech using Gemini TTS

@@ -381,12 +381,25 @@ export default function Home() {
       </div>
 
       {/* Debug Log Panel */}
-      <div className="fixed bottom-0 left-0 right-0 bg-slate-800 border-t border-slate-700 max-h-48 flex flex-col">
+      <div 
+        className="fixed bottom-0 left-0 right-0 bg-slate-800 border-t-2 border-slate-600 max-h-48 flex flex-col z-50"
+        style={{ 
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          backgroundColor: '#1e293b',
+          borderTop: '2px solid #475569',
+          maxHeight: '12rem',
+          zIndex: 9999
+        }}
+      >
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-300">Debug Log</h3>
+          <h3 className="text-sm font-semibold text-slate-300" style={{ color: '#cbd5e1', fontWeight: 600 }}>Debug Log</h3>
           <button
             onClick={() => setDebugLogs([])}
             className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1"
+            style={{ color: '#94a3b8' }}
           >
             Clear
           </button>
@@ -394,22 +407,25 @@ export default function Home() {
         <div
           ref={debugLogRef}
           className="flex-1 overflow-y-auto px-4 py-2 text-xs font-mono space-y-1"
+          style={{ 
+            flex: 1,
+            overflowY: 'auto',
+            padding: '0.5rem 1rem',
+            fontSize: '0.75rem',
+            fontFamily: 'monospace'
+          }}
         >
           {debugLogs.length === 0 ? (
-            <div className="text-slate-500">No logs yet...</div>
+            <div className="text-slate-500" style={{ color: '#64748b' }}>No logs yet...</div>
           ) : (
             debugLogs.map((log, index) => (
               <div
                 key={index}
-                className={`${
-                  log.type === 'error'
-                    ? 'text-red-400'
-                    : log.type === 'warn'
-                    ? 'text-yellow-400'
-                    : 'text-slate-300'
-                }`}
+                style={{
+                  color: log.type === 'error' ? '#f87171' : log.type === 'warn' ? '#fbbf24' : '#cbd5e1'
+                }}
               >
-                <span className="text-slate-500">[{log.time}]</span> {log.message}
+                <span style={{ color: '#64748b' }}>[{log.time}]</span> {log.message}
               </div>
             ))
           )}
