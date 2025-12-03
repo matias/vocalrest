@@ -24,6 +24,7 @@ export default function Home() {
   // Audio Context Refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const isSpeakingRef = useRef(false); // Prevent concurrent speakText calls
 
   // Store original console methods
   const originalConsoleRef = useRef({
@@ -162,6 +163,7 @@ export default function Home() {
       sourceNodeRef.current = null;
     }
     setIsPlaying(false);
+    isSpeakingRef.current = false;
   }, []);
 
   // Helper function to play audio from base64
@@ -189,6 +191,7 @@ export default function Home() {
     source.onended = () => {
       setIsPlaying(false);
       sourceNodeRef.current = null;
+      isSpeakingRef.current = false; // Reset flag when audio finishes
     };
 
     sourceNodeRef.current = source;
@@ -200,48 +203,57 @@ export default function Home() {
   const speakText = async (textToSpeak: string) => {
     if (!textToSpeak.trim()) return;
     
-    // Stop any existing playback
-    stopPlayback();
-    setError(null);
-    
-    const normalized = normalizeText(textToSpeak);
-    addDebugLog(`Speaking text, normalized: ${normalized}`);
-    
-    // Check cache first (only if IndexedDB is available)
-    if (typeof indexedDB !== 'undefined') {
-      try {
-        const cached = await getCachedAudio(normalized);
-        
-        if (cached) {
-          addDebugLog('✓ Cache HIT - Using cached audio');
-          // Use cached audio
-          setIsGenerating(false);
-          await playAudioFromBase64(cached.base64Audio);
-          
-          // Update cache with new timestamp and potentially new originalText
-          await cacheAudio(normalized, textToSpeak, cached.base64Audio, cached.voice);
-          
-          // Update history (move to top) - use the text that was actually typed
-          await addToHistory(textToSpeak, cached.base64Audio);
-          
-          // Clear the input text
-          setInputText('');
-          return;
-        } else {
-          addDebugLog('✗ Cache MISS - Generating new audio');
-        }
-      } catch (error: any) {
-        addDebugLog(`Error checking cache, will generate new audio: ${error.message}`, 'error');
-        // Continue to generate new audio if cache check fails
-      }
-    } else {
-      addDebugLog('IndexedDB not available, skipping cache check', 'warn');
+    // Prevent concurrent calls
+    if (isSpeakingRef.current) {
+      addDebugLog('Already speaking, ignoring duplicate call', 'warn');
+      return;
     }
-
-    // Not in cache, generate new audio
-    setIsGenerating(true);
-
+    
+    isSpeakingRef.current = true;
+    
     try {
+      // Stop any existing playback
+      stopPlayback();
+      setError(null);
+      
+      const normalized = normalizeText(textToSpeak);
+      addDebugLog(`Speaking text, normalized: ${normalized}`);
+      
+      // Check cache first (only if IndexedDB is available)
+      if (typeof indexedDB !== 'undefined') {
+        try {
+          const cached = await getCachedAudio(normalized);
+          
+          if (cached) {
+            addDebugLog('✓ Cache HIT - Using cached audio');
+            // Use cached audio
+            setIsGenerating(false);
+            await playAudioFromBase64(cached.base64Audio);
+            
+            // Update cache with new timestamp and potentially new originalText
+            await cacheAudio(normalized, textToSpeak, cached.base64Audio, cached.voice);
+            
+            // Update history (move to top) - use the text that was actually typed
+            await addToHistory(textToSpeak, cached.base64Audio);
+            
+            // Clear the input text
+            setInputText('');
+            isSpeakingRef.current = false;
+            return;
+          } else {
+            addDebugLog('✗ Cache MISS - Generating new audio');
+          }
+        } catch (error: any) {
+          addDebugLog(`Error checking cache, will generate new audio: ${error.message}`, 'error');
+          // Continue to generate new audio if cache check fails
+        }
+      } else {
+        addDebugLog('IndexedDB not available, skipping cache check', 'warn');
+      }
+
+      // Not in cache, generate new audio
+      setIsGenerating(true);
+
       // Initialize AudioContext if needed
       if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
@@ -294,6 +306,8 @@ export default function Home() {
       setError(err.message || "Failed to generate speech. Please try again.");
       setIsGenerating(false);
       setIsPlaying(false);
+    } finally {
+      isSpeakingRef.current = false;
     }
   };
 
