@@ -34,7 +34,7 @@ const App: React.FC = () => {
       try {
         const cachedEntries = await getAllCachedEntries();
         const historyItems: HistoryItem[] = cachedEntries
-          .slice(0, 10) // Keep last 10
+          .slice(0, 30) // Keep last 30
           .map(entry => ({
             id: entry.timestamp.toString(),
             text: entry.originalText,

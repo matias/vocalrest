@@ -23,7 +23,7 @@ export const History: React.FC<HistoryProps> = ({ history, onHistoryItemClick, o
           Clear
         </button>
       </div>
-      <div className="space-y-2">
+      <div className="max-h-96 overflow-y-auto space-y-2 pr-2">
         {history.map((item) => (
           <button
             key={item.id}
