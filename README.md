@@ -1,10 +1,23 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
-
 # VocalRest
 
-A Next.js app that helps you speak when you can't use your voice. Type text and let AI speak for you using Gemini TTS.
+![Status](https://img.shields.io/badge/status-maintenance%20mode-orange)
+
+A Next.js web application that helps you communicate when you can't use your voice. Type text and let AI speak for you using Google's Gemini Text-to-Speech API.
+
+Perfect for situations like laryngitis, voice rest, or any time you need to communicate without speaking. I initially vibe-coded this quickly on Google AI Studio, then tweaked it a bit more. The voice is meant to sound vaguely like my own (not very well, but still), but you can choose lots of [other voices](https://ai.google.dev/gemini-api/docs/speech-generation#voices) or change the prompt as needed (different voices may need different prompting) to make it sound a bit more like you.
+
+![VocalRest Screenshot](vocalrest-screenshot.png)
+
+
+## Features
+
+- **Text-to-Speech**: Convert typed text to natural-sounding speech using Gemini TTS
+- **Multiple Voice Options**: Choose from 7 different voices (Orus, Umbriel, Algenib, Sadaltager, Charon, Fenrir, Puck) with varying tones and styles
+- **Quick Phrases**: One-click buttons for common phrases like "Thank you", "Yes, please", "No, thanks", and more
+- **Speech History**: View and replay your recent spoken phrases (last 30 items)
+- **Audio Caching**: Automatically caches generated audio in IndexedDB for instant playback of repeated phrases
+- **Dark Mode UI**: Modern, accessible dark theme interface
+- **Keyboard Shortcuts**: Press Enter to speak (Shift+Enter for new line)
 
 ## Run Locally
 
@@ -36,11 +49,16 @@ npm start
 
 This will build the app and run it in production mode on [http://localhost:3000](http://localhost:3000). Use this to test the production build locally before deploying.
 
-## Features
+## Technology Stack
 
-- Text-to-speech using Gemini TTS
-- Multiple voice options
-- Audio caching with IndexedDB
-- Recent history of spoken phrases
-- Quick phrase buttons
-- Dark mode UI
+- **Next.js 15** - React framework
+- **React 19** - UI library
+- **TypeScript** - Type safety
+- **Tailwind CSS** - Styling
+- **Google Gemini API** - Text-to-speech generation
+- **IndexedDB** - Client-side audio caching
+- **Web Audio API** - Audio playback
+
+## License
+
+MIT
