@@ -4,7 +4,7 @@
 
 A Next.js web application that helps you communicate when you can't use your voice. Type text and let AI speak for you using Google's Gemini Text-to-Speech API.
 
-Perfect for situations like laryngitis, voice rest, or any time you need to communicate without speaking. I initially vibe-coded this quickly on Google AI Studio, then tweaked it a bit more. The voice is meant to sound vaguely like my own (not very well, but still), but you can choose lots of [other voices](https://ai.google.dev/gemini-api/docs/speech-generation#voices) or change the prompt as needed (different voices may need different prompting) to make it sound a bit more like you.
+Perfect for situations like laryngitis, voice rest, or any time you need to communicate without speaking. I initially vibe-coded this quickly on Google AI Studio, then tweaked it a bit more. The voice is meant to sound vaguely like my own (not very well, but still), but you can choose lots of [other voices](https://ai.google.dev/gemini-api/docs/speech-generation#voices) or change the prompt as needed (different voices may need different prompting) to make it sound a bit more like you. Try it at https://vocalrest.vercel.app (but please don't abuse it, the default API quota for TTS is quite small)!
 
 ![VocalRest Screenshot](vocalrest-screenshot.png)
 
